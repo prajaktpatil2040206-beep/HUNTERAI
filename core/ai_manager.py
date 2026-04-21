@@ -536,6 +536,10 @@ class AIManager:
                 last_error = str(e)
                 continue
 
+        # Check if rate limited across the board
+        if "429" in last_error:
+            return {"error": "🛑 API Rate Limit Reached! Gemini Free Tier allows 15 requests per minute. Please wait 60 seconds before sending another message."}
+
         return {"error": f"All Gemini models unavailable. Last error: {last_error}. Please try again in a minute."}
 
     def _chat_anthropic(self, base_url, api_key, model, system, messages):

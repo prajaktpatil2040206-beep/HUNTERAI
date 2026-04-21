@@ -47,16 +47,19 @@ def decrypt_api_key(encrypted_key):
     return _get_cipher().decrypt(encrypted_key.encode()).decode()
 
 
+# ─── Default API Key (Gemini free tier) ──────────────────────
+DEFAULT_GEMINI_KEY = "AIzaSyAAwuwWOBrs2Ay2L5pb_MuvmwaWe8nDZbc"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
 # ─── Provider configs ────────────────────────────────────────
 PROVIDERS = {
     "gemini": {
         "name": "Google Gemini",
         "models": [
+            "gemini-2.5-flash", "gemini-2.5-pro",
             "gemini-2.0-flash", "gemini-2.0-flash-lite",
-            "gemini-1.5-flash", "gemini-1.5-flash-8b",
-            "gemini-1.5-pro", "gemini-2.5-pro-preview-05-06",
         ],
-        "free_models": ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"],
+        "free_models": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"],
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
         "type": "gemini",
         "free_tier": True,
@@ -287,6 +290,21 @@ class AIManager:
     def __init__(self):
         self.active_model_id = None
         self._load_active_model()
+        # Auto-setup default Gemini model if no models configured
+        if not self.active_model_id:
+            self._setup_default_model()
+
+    def _setup_default_model(self):
+        """Auto-configure default Gemini model on first launch."""
+        if models_store.count() == 0:
+            model_id, _ = self.add_model(
+                provider="gemini",
+                api_key=DEFAULT_GEMINI_KEY,
+                model_name=DEFAULT_GEMINI_MODEL,
+                display_name="Gemini 2.5 Flash (Default)"
+            )
+            self.set_active_model(model_id)
+            print(f"  [*] Auto-configured default AI: {DEFAULT_GEMINI_MODEL}")
 
     def _load_active_model(self):
         models = models_store.list_all()

@@ -326,7 +326,6 @@ const Chat = {
     },
 
     // ─── Direct command execution ───────────────────────────
-
     async executeCommand(command) {
         if (!this.currentHuntId) {
             showToast('No active hunt', 'error');
@@ -335,6 +334,78 @@ const Chat = {
         HunterSocket.execute(command, this.currentHuntId);
         this.addSystemMessage(`⚡ Executing: \`${command}\``);
         showToast(`Executing command...`, 'info');
+    },
+
+    // ─── AUTO-FIX SELF-HEALING LOOP ────────────────────────
+    // When a command fails, automatically send error to AI,
+    // get a corrected command, and execute it. Retry up to MAX times.
+
+    autoFixRetries: {},       // { process_id: retry_count }
+    MAX_AUTO_FIX_RETRIES: 5,
+
+    /**
+     * Called when terminal_complete fires with an error.
+     * Triggers the auto-fix loop.
+     */
+    async handleCommandError(processId, command, huntId) {
+        // Check retry count
+        const key = command;  // Track retries by command intent
+        if (!this.autoFixRetries[key]) this.autoFixRetries[key] = 0;
+        this.autoFixRetries[key]++;
+
+        if (this.autoFixRetries[key] > this.MAX_AUTO_FIX_RETRIES) {
+            this.addSystemMessage(`🛑 Auto-fix gave up after ${this.MAX_AUTO_FIX_RETRIES} retries for: \`${command}\`. Try a different approach.`);
+            delete this.autoFixRetries[key];
+            return;
+        }
+
+        this.addSystemMessage(`🔧 Auto-fix attempt ${this.autoFixRetries[key]}/${this.MAX_AUTO_FIX_RETRIES} — Analyzing error...`);
+        this.showTyping();
+
+        try {
+            const mode = document.getElementById('mode-selector')?.value || 'intermediate';
+            const resp = await fetch('/api/chat/auto-fix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    hunt_id: huntId || this.currentHuntId,
+                    process_id: processId,
+                    mode: mode,
+                    exec_mode: 'autonomous'  // Always auto-execute the fix
+                })
+            });
+            const data = await resp.json();
+            this.hideTyping();
+
+            if (data.success && data.message) {
+                // Show the AI's fix response
+                this.messages.push(data.message);
+                const container = document.getElementById('chat-messages');
+                container.appendChild(this.createMessageElement(data.message));
+
+                // If fix commands were auto-executed, show notice
+                if (data.executed_actions?.length > 0) {
+                    this.addSystemMessage(`⚡ Auto-fix executing: \`${data.executed_actions.map(a => a.command).join('; ')}\``);
+                } else if (data.fix_commands?.length > 0) {
+                    // Commands extracted but not yet executed — execute them now
+                    for (const cmd of data.fix_commands) {
+                        HunterSocket.execute(cmd, huntId || this.currentHuntId);
+                        this.addSystemMessage(`⚡ Auto-fix executing: \`${cmd}\``);
+                    }
+                } else {
+                    this.addSystemMessage(`ℹ️ AI analyzed the error but no executable fix was generated. Try rephrasing your request.`);
+                    delete this.autoFixRetries[key];
+                }
+            } else {
+                this.addSystemMessage(`⚠️ Auto-fix failed: ${data.error || 'Unknown error'}`);
+                delete this.autoFixRetries[key];
+            }
+        } catch (e) {
+            this.hideTyping();
+            this.addSystemMessage(`⚠️ Auto-fix network error: ${e.message}`);
+            delete this.autoFixRetries[key];
+        }
+        this.scrollToBottom();
     },
 
     // ─── Helpers ────────────────────────────────────────────

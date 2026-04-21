@@ -57,6 +57,12 @@ const Terminal = {
         this.processCount = Math.max(0, this.processCount - 1);
         this.updateProcessCount();
         this.scrollToBottom();
+
+        // ─── AUTO-FIX TRIGGER ──────────
+        // If command failed and chat is available, trigger self-handling loop
+        if (isError && typeof Chat !== 'undefined' && Chat.execMode === 'autonomous') {
+            Chat.handleCommandError(data.process_id, data.command, data.hunt_id);
+        }
     },
 
     onError(data) {

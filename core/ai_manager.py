@@ -481,10 +481,15 @@ class AIManager:
         return {"error": f"API error ({resp.status_code}): {resp.text[:300]}"}
 
     def _chat_gemini(self, base_url, api_key, model, system, messages):
-        url = f"{base_url}/models/{model}:generateContent?key={api_key}"
+        """Chat with Gemini API. Auto-fallback to other models on 503/429."""
+        # Models to try in order (current model first, then fallbacks)
+        fallback_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+        # Put the requested model first, then add fallbacks
+        models_to_try = [model] + [m for m in fallback_models if m != model]
+
         contents = [
             {"role": "user", "parts": [{"text": system}]},
-            {"role": "model", "parts": [{"text": "Understood. HunterAI ready. I will:\n1. Understand the target first\n2. Create a structured attack plan\n3. Ask for approval before executing\n4. Execute systematically\n5. Auto-detect and fix any errors\n6. Report findings with severity ratings\n\nReady to hunt. 🛡"}]}
+            {"role": "model", "parts": [{"text": "Understood. HunterAI ready. I will:\n1. Understand the target first\n2. Create a structured attack plan\n3. Ask for approval before executing\n4. Execute systematically\n5. Auto-detect and fix any errors\n6. Report findings with severity ratings\n\nReady to hunt."}]}
         ]
         for msg in messages:
             role = "user" if msg["role"] == "user" else "model"
@@ -499,19 +504,39 @@ class AIManager:
                 {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             ]
         }
-        resp = requests.post(url, json=payload, timeout=120)
-        if resp.status_code == 200:
-            data = resp.json()
+
+        last_error = ""
+        for try_model in models_to_try:
+            url = f"{base_url}/models/{try_model}:generateContent?key={api_key}"
             try:
-                content = data["candidates"][0]["content"]["parts"][0]["text"]
-                return {"response": content, "usage": data.get("usageMetadata", {})}
-            except (KeyError, IndexError):
-                # Check for safety block
-                block_reason = data.get("candidates", [{}])[0].get("finishReason", "")
-                if block_reason == "SAFETY":
-                    return {"error": "Gemini blocked the response due to safety filters. Try rephrasing or use a different model."}
-                return {"error": "Gemini returned empty response."}
-        return {"error": f"Gemini API error ({resp.status_code}): {resp.text[:300]}"}
+                resp = requests.post(url, json=payload, timeout=120)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    try:
+                        content = data["candidates"][0]["content"]["parts"][0]["text"]
+                        return {"response": content, "usage": data.get("usageMetadata", {}), "model_used": try_model}
+                    except (KeyError, IndexError):
+                        block_reason = data.get("candidates", [{}])[0].get("finishReason", "")
+                        if block_reason == "SAFETY":
+                            return {"error": "Gemini blocked the response due to safety filters. Try rephrasing or use a different model."}
+                        last_error = "Gemini returned empty response."
+                        continue
+                elif resp.status_code in (429, 503):
+                    # Rate limited or overloaded — try next model
+                    last_error = f"{try_model} unavailable ({resp.status_code})"
+                    time.sleep(1)  # Brief pause before fallback
+                    continue
+                else:
+                    last_error = f"Gemini API error ({resp.status_code}): {resp.text[:300]}"
+                    continue
+            except requests.exceptions.Timeout:
+                last_error = f"{try_model} timed out"
+                continue
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        return {"error": f"All Gemini models unavailable. Last error: {last_error}. Please try again in a minute."}
 
     def _chat_anthropic(self, base_url, api_key, model, system, messages):
         headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}

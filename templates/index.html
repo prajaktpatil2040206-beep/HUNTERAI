@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="HunterAI - Autonomous AI-Powered Bug Bounty & Penetration Testing Platform">
+    <title>HunterAI — AI-Powered Bug Bounty Platform</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+
+    <!-- Highlight.js for code highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <!-- Main CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app" class="app-container">
+
+        <!-- ═══ LEFT SIDEBAR ═══ -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">🛡</span>
+                    <span class="logo-text">HUNTER<span class="accent">AI</span></span>
+                </div>
+                <button id="sidebar-toggle" class="sidebar-toggle" title="Toggle Sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
+            </div>
+
+            <!-- New Hunt Button -->
+            <button id="btn-new-hunt" class="btn-new-hunt" onclick="showNewHuntModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>New Hunt</span>
+            </button>
+
+            <!-- Projects Section -->
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">
+                    <span>Projects</span>
+                    <button class="btn-icon-sm" onclick="showNewProjectModal()" title="New Project">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                </div>
+                <div id="projects-list" class="project-tree">
+                    <!-- Projects loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- Recent Hunts -->
+            <div class="sidebar-section">
+                <div class="sidebar-section-title"><span>Recent Hunts</span></div>
+                <div id="recent-hunts-list" class="hunt-list">
+                    <!-- Recent hunts loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- Quick Links -->
+            <div class="sidebar-footer">
+                <button class="sidebar-link" onclick="showAssetsPanel()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                    Assets
+                </button>
+                <button class="sidebar-link" onclick="showToolsPanel()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                    Tool Inventory
+                </button>
+                <button class="sidebar-link" onclick="showSettingsModal()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    Settings
+                </button>
+            </div>
+        </aside>
+
+        <!-- ═══ MAIN CONTENT ═══ -->
+        <main class="main-content">
+
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div class="top-bar-left">
+                    <button id="mobile-menu-btn" class="btn-icon mobile-only" onclick="toggleSidebar()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    </button>
+                    <div id="current-hunt-title" class="hunt-title">HunterAI</div>
+                    <div id="hunt-status-badge" class="status-badge hidden">idle</div>
+                </div>
+                <div class="top-bar-right">
+                    <!-- Execution Mode Toggle (Autonomous / Feedback) -->
+                    <button id="btn-exec-mode" class="exec-mode-toggle" onclick="toggleExecMode()" title="Toggle Autonomous/Feedback Mode">
+                        <span id="exec-mode-label" class="exec-mode-label feedback">🔐 Feedback</span>
+                    </button>
+
+                    <!-- Mode Selector -->
+                    <select id="mode-selector" class="mode-selector" onchange="changeMode(this.value)">
+                        <option value="beginner">🎓 Beginner</option>
+                        <option value="intermediate" selected>⚡ Intermediate</option>
+                        <option value="pro">🔥 Pro Hunter</option>
+                    </select>
+
+                    <!-- Model Selector -->
+                    <button id="btn-model-selector" class="btn-model" onclick="showModelModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"></path><path d="M16 14H8a4 4 0 0 0-4 4v2h16v-2a4 4 0 0 0-4-4z"></path></svg>
+                        <span id="active-model-name">No Model</span>
+                    </button>
+
+                    <!-- Connection Status -->
+                    <div id="connection-status" class="connection-indicator">
+                        <span class="dot"></span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- ═══ CHAT + TERMINAL AREA ═══ -->
+            <div class="content-wrapper">
+
+                <!-- Chat Area -->
+                <div id="chat-area" class="chat-area">
+                    <!-- Welcome Screen (shown when no hunt is active) -->
+                    <div id="welcome-screen" class="welcome-screen">
+                        <div class="welcome-logo">🛡</div>
+                        <h1>HUNTER<span class="accent">AI</span></h1>
+                        <p class="welcome-tagline">Think Like a Hacker. Hunt Like a Machine.</p>
+                        <div class="welcome-features">
+                            <div class="feature-card" onclick="showNewHuntModal()">
+                                <div class="feature-icon">🎯</div>
+                                <h3>Start a Hunt</h3>
+                                <p>Launch a new bug bounty or penetration test</p>
+                            </div>
+                            <div class="feature-card" onclick="showModelModal()">
+                                <div class="feature-icon">🤖</div>
+                                <h3>Configure AI</h3>
+                                <p>Set up Gemini, GPT-4, Claude, or other models</p>
+                            </div>
+                            <div class="feature-card" onclick="showToolsPanel()">
+                                <div class="feature-icon">🔧</div>
+                                <h3>Tool Inventory</h3>
+                                <p>Scan and manage your Kali Linux tools</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chat Messages Container -->
+                    <div id="chat-messages" class="chat-messages hidden">
+                        <!-- Messages rendered here -->
+                    </div>
+
+                    <!-- Typing Indicator -->
+                    <div id="typing-indicator" class="typing-indicator hidden">
+                        <div class="typing-avatar">🛡</div>
+                        <div class="typing-dots">
+                            <span></span><span></span><span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ EMBEDDED TERMINAL PANEL ═══ -->
+                <div id="terminal-panel" class="terminal-panel">
+                    <div class="terminal-header">
+                        <div class="terminal-header-left">
+                            <div class="terminal-dots">
+                                <span class="dot-red"></span>
+                                <span class="dot-yellow"></span>
+                                <span class="dot-green"></span>
+                            </div>
+                            <span class="terminal-title">HunterAI Terminal</span>
+                        </div>
+                        <div class="terminal-header-right">
+                            <span id="terminal-process-count" class="terminal-badge">0 processes</span>
+                            <button class="btn-icon-sm" onclick="clearTerminal()" title="Clear">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path></svg>
+                            </button>
+                            <button class="btn-icon-sm" onclick="toggleTerminal()" title="Toggle Terminal" id="btn-toggle-terminal">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="terminal-output" class="terminal-output">
+                        <div class="terminal-line terminal-system">
+                            <span class="terminal-prompt">⚡</span>
+                            <span>HunterAI Terminal v1.0 — Ready</span>
+                        </div>
+                        <div class="terminal-line terminal-system">
+                            <span class="terminal-prompt">⚡</span>
+                            <span>Commands executed by HunterAI will appear here in real-time.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ CHAT INPUT BAR ═══ -->
+            <div class="chat-input-container">
+                <div class="chat-input-wrapper">
+                    <!-- Attachment Button -->
+                    <button class="btn-attach" onclick="triggerFileUpload()" title="Attach File">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                    </button>
+                    <input type="file" id="file-input" class="hidden" onchange="handleFileUpload(this)" multiple>
+
+                    <!-- Text Input -->
+                    <textarea id="chat-input" class="chat-input" placeholder="Describe your target or ask HunterAI anything..." rows="1" onkeydown="handleInputKeydown(event)" oninput="autoResizeInput(this)"></textarea>
+
+                    <!-- Voice Input Button -->
+                    <button id="btn-voice" class="btn-voice" onclick="toggleVoiceInput()" title="Voice Input">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                    </button>
+
+                    <!-- Send Button -->
+                    <button id="btn-send" class="btn-send" onclick="sendMessage()" title="Send Message">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </div>
+                <div class="chat-input-footer">
+                    <span id="input-status" class="input-status"></span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ═══ NEW HUNT MODAL ═══ -->
+    <div id="modal-new-hunt" class="modal hidden">
+        <div class="modal-overlay" onclick="closeModal('modal-new-hunt')"></div>
+        <div class="modal-content modal-md">
+            <div class="modal-header">
+                <h2>🎯 New Hunt</h2>
+                <button class="btn-close" onclick="closeModal('modal-new-hunt')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Hunt Name</label>
+                    <input type="text" id="hunt-name" class="form-input" placeholder="e.g., Web App Test - Session 1">
+                </div>
+                <div class="form-group">
+                    <label>Target URL / IP</label>
+                    <input type="text" id="hunt-target" class="form-input" placeholder="e.g., https://target.com or 192.168.1.1">
+                </div>
+                <div class="form-group">
+                    <label>Target Type</label>
+                    <select id="hunt-type" class="form-input">
+                        <option value="web">🌐 Web Application</option>
+                        <option value="api">🔌 API</option>
+                        <option value="network">🖧 Network</option>
+                        <option value="mobile">📱 Mobile APK</option>
+                        <option value="file">📄 File Analysis</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Description / Assignment</label>
+                    <textarea id="hunt-description" class="form-input" rows="3" placeholder="Describe the scope and goals..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Project</label>
+                    <select id="hunt-project" class="form-input">
+                        <option value="">— No Project —</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Mode</label>
+                    <div class="mode-cards">
+                        <label class="mode-card">
+                            <input type="radio" name="hunt-mode" value="beginner">
+                            <div class="mode-card-inner">
+                                <span class="mode-emoji">🎓</span>
+                                <span class="mode-label">Beginner</span>
+                                <span class="mode-desc">Detailed explanations</span>
+                            </div>
+                        </label>
+                        <label class="mode-card">
+                            <input type="radio" name="hunt-mode" value="intermediate" checked>
+                            <div class="mode-card-inner">
+                                <span class="mode-emoji">⚡</span>
+                                <span class="mode-label">Intermediate</span>
+                                <span class="mode-desc">Balanced guidance</span>
+                            </div>
+                        </label>
+                        <label class="mode-card">
+                            <input type="radio" name="hunt-mode" value="pro">
+                            <div class="mode-card-inner">
+                                <span class="mode-emoji">🔥</span>
+                                <span class="mode-label">Pro Hunter</span>
+                                <span class="mode-desc">Action-oriented</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modal-new-hunt')">Cancel</button>
+                <button class="btn btn-primary" onclick="createHunt()">🚀 Start Hunt</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ NEW PROJECT MODAL ═══ -->
+    <div id="modal-new-project" class="modal hidden">
+        <div class="modal-overlay" onclick="closeModal('modal-new-project')"></div>
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h2>📁 New Project</h2>
+                <button class="btn-close" onclick="closeModal('modal-new-project')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Project Name</label>
+                    <input type="text" id="project-name" class="form-input" placeholder="e.g., HackerOne - Acme Corp">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="project-description" class="form-input" rows="3" placeholder="Bug bounty program details..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modal-new-project')">Cancel</button>
+                <button class="btn btn-primary" onclick="createProject()">Create Project</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ MODEL MANAGEMENT MODAL ═══ -->
+    <div id="modal-models" class="modal hidden">
+        <div class="modal-overlay" onclick="closeModal('modal-models')"></div>
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h2>🤖 AI Model Management</h2>
+                <button class="btn-close" onclick="closeModal('modal-models')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Provider Cards -->
+                <div class="provider-grid" id="provider-grid">
+                    <div class="provider-card" onclick="selectProvider('gemini')">
+                        <span class="free-badge">FREE</span>
+                        <div class="provider-icon">✦</div>
+                        <div class="provider-name">Google Gemini</div>
+                        <div class="provider-models">Flash (free), Pro</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('groq')">
+                        <span class="free-badge">FREE</span>
+                        <div class="provider-icon">⚡</div>
+                        <div class="provider-name">Groq (Fast)</div>
+                        <div class="provider-models">LLaMA 70B, Mixtral</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('openrouter')">
+                        <span class="free-badge">FREE</span>
+                        <div class="provider-icon">🔀</div>
+                        <div class="provider-name">OpenRouter</div>
+                        <div class="provider-models">Gemini, LLaMA, DeepSeek</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('ollama')">
+                        <span class="free-badge">LOCAL</span>
+                        <div class="provider-icon">🦙</div>
+                        <div class="provider-name">Ollama (Local)</div>
+                        <div class="provider-models">LLaMA, Mistral, Phi</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('openai')">
+                        <div class="provider-icon">◉</div>
+                        <div class="provider-name">OpenAI</div>
+                        <div class="provider-models">GPT-4o, GPT-4o-mini</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('anthropic')">
+                        <div class="provider-icon">◈</div>
+                        <div class="provider-name">Anthropic Claude</div>
+                        <div class="provider-models">Sonnet 3.5, Haiku</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('mistral')">
+                        <span class="free-badge">FREE</span>
+                        <div class="provider-icon">▲</div>
+                        <div class="provider-name">Mistral AI</div>
+                        <div class="provider-models">Nemo (free), Large</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('kimi')">
+                        <div class="provider-icon">☽</div>
+                        <div class="provider-name">Kimi (Moonshot)</div>
+                        <div class="provider-models">moonshot 8k/32k/128k</div>
+                    </div>
+                    <div class="provider-card" onclick="selectProvider('custom')">
+                        <div class="provider-icon">⚙</div>
+                        <div class="provider-name">Custom Endpoint</div>
+                        <div class="provider-models">Any OpenAI-compatible</div>
+                    </div>
+                </div>
+
+                <!-- Add Model Form (hidden initially) -->
+                <div id="add-model-form" class="add-model-form hidden">
+                    <h3 id="add-model-provider-name">Add Model</h3>
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select id="add-model-name" class="form-input">
+                        </select>
+                    </div>
+                    <div class="form-group" id="custom-url-group" style="display:none">
+                        <label>API Base URL</label>
+                        <input type="text" id="add-model-url" class="form-input" placeholder="https://api.example.com/v1">
+                    </div>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" id="add-model-key" class="form-input" placeholder="Enter your API key...">
+                    </div>
+                    <div class="form-group">
+                        <label>Display Name (optional)</label>
+                        <input type="text" id="add-model-display" class="form-input" placeholder="My GPT-4">
+                    </div>
+                    <div class="form-row">
+                        <button class="btn btn-secondary" onclick="cancelAddModel()">Back</button>
+                        <button class="btn btn-accent" onclick="testAndAddModel()" id="btn-test-model">
+                            <span id="test-model-text">Test & Add</span>
+                        </button>
+                    </div>
+                    <div id="model-test-result" class="model-test-result hidden"></div>
+                </div>
+
+                <!-- Configured Models List -->
+                <div class="configured-models">
+                    <h3>Configured Models</h3>
+                    <div id="models-list" class="models-list">
+                        <div class="empty-state">No models configured yet. Click a provider above to add one.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ SETTINGS MODAL ═══ -->
+    <div id="modal-settings" class="modal hidden">
+        <div class="modal-overlay" onclick="closeModal('modal-settings')"></div>
+        <div class="modal-content modal-md">
+            <div class="modal-header">
+                <h2>⚙ Settings</h2>
+                <button class="btn-close" onclick="closeModal('modal-settings')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Scope Enforcement</label>
+                    <select id="setting-scope-mode" class="form-input">
+                        <option value="strict">🔒 Strict (Block out-of-scope)</option>
+                        <option value="advisory">⚠ Advisory (Warn only)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Default Mode</label>
+                    <select id="setting-default-mode" class="form-input">
+                        <option value="beginner">🎓 Beginner</option>
+                        <option value="intermediate">⚡ Intermediate</option>
+                        <option value="pro">🔥 Pro Hunter</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Server Port</label>
+                    <input type="number" id="setting-port" class="form-input" value="5000">
+                </div>
+                <div class="settings-section">
+                    <h3>System</h3>
+                    <button class="btn btn-secondary" onclick="scanTools()">🔍 Re-scan Tools</button>
+                    <button class="btn btn-secondary" onclick="checkApiStatus()">📡 Check API Status</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ TOOLS PANEL MODAL ═══ -->
+    <div id="modal-tools" class="modal hidden">
+        <div class="modal-overlay" onclick="closeModal('modal-tools')"></div>
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h2>🔧 Tool Inventory</h2>
+                <button class="btn-close" onclick="closeModal('modal-tools')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="tools-summary" id="tools-summary">
+                    <p>Click "Scan Tools" to discover installed Kali Linux tools.</p>
+                </div>
+                <button class="btn btn-accent" onclick="scanTools()" id="btn-scan-tools">🔍 Scan Tools</button>
+                <div id="tools-grid" class="tools-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ LEGAL DISCLAIMER MODAL ═══ -->
+    <div id="modal-legal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-md">
+            <div class="modal-header">
+                <h2>⚖ Legal Disclaimer</h2>
+            </div>
+            <div class="modal-body">
+                <div class="legal-text" id="legal-text"></div>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="legal-checkbox">
+                    <span>I confirm I have written authorization to test the defined targets.</span>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="btn-accept-legal" onclick="acceptLegal()" disabled>Accept & Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- JavaScript -->
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/terminal.js"></script>
+    <script src="/static/js/chat.js"></script>
+    <script src="/static/js/sidebar.js"></script>
+    <script src="/static/js/models.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

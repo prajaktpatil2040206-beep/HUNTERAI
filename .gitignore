@@ -1,0 +1,17 @@
+# HunterAI
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.env
+data/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+*.swp
+*.bak
+doc_output.txt
+HunterAI_Architecture_Document.docx

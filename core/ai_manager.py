@@ -523,9 +523,9 @@ class AIManager:
                         continue
                 elif resp.status_code in (429, 503):
                     # Rate limited or overloaded — try next model
-                    last_error = f"{try_model} unavailable ({resp.status_code})"
-                    # Exponential backoff: 1s, 2s, 4s per model index
-                    backoff = min(2 ** models_to_try.index(try_model), 8)
+                    last_error = f"🛑 API Rate Limit Reached! Gemini Free Tier allows 15 requests per minute. Please wait 60 seconds or upgrade your plan."
+                    # More aggressive backoff for rate limits: 10s, 20s, 30s
+                    backoff = min((models_to_try.index(try_model) + 1) * 10, 30)
                     time.sleep(backoff)
                     continue
                 else:

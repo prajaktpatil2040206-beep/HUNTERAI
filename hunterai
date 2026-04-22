@@ -3,7 +3,8 @@
 # HunterAI — CLI Entry Point
 # Usage: sudo hunterai  OR  sudo HUNTERAI
 # Starts the Flask server and opens the browser.
-# Running with sudo ensures all commands execute without permission issues.
+# Auto-installs missing dependencies on first run.
+# Forces root privileges for unrestricted system access.
 # ═══════════════════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -24,12 +25,26 @@ echo -e "\033[0;36m    🛡  Autonomous AI-Powered Bug Bounty Platform\033[0m"
 echo -e "\033[0;33m    \"Think Like a Hacker. Hunt Like a Machine.\"\033[0m"
 echo ""
 
-# Check root
+# ─── Force root execution ──────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
-    echo -e "\033[1;33m[!] Running without root. Some commands may require sudo.\033[0m"
-    echo -e "\033[1;33m    Recommended: sudo hunterai\033[0m"
-    echo ""
+    echo -e "\033[1;33m[!] Root required for unrestricted access. Re-launching with sudo...\033[0m"
+    exec sudo bash "$0" "$@"
+    exit 1
 fi
+
+echo -e "\033[0;32m    ✓ Running as root — full system access enabled\033[0m"
+
+# ─── Fix all file permissions in project directory ─────────
+chmod -R 755 "$SCRIPT_DIR" 2>/dev/null
+chmod +x "$SCRIPT_DIR/hunterai" 2>/dev/null
+chmod +x "$SCRIPT_DIR/install.sh" 2>/dev/null
+
+# ─── Ensure data directories exist with full permissions ───
+mkdir -p "$SCRIPT_DIR/data"/{projects,hunts,chats,models,tools,assets,reports,scope,plans,vulnerabilities,terminal_logs,actions}
+chmod -R 777 "$SCRIPT_DIR/data" 2>/dev/null
+
+# ─── Remove any restrictive umask ──────────────────────────
+umask 0000
 
 # Activate venv if exists
 if [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
@@ -38,9 +53,57 @@ fi
 
 cd "$SCRIPT_DIR"
 
+# ─── Auto-install missing dependencies ─────────────────────
+_check_and_install() {
+    python3 -c "import flask; import flask_cors; import flask_socketio; import cryptography; import requests" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        echo -e "\033[1;33m[*] Missing dependencies detected — auto-installing...\033[0m"
+        pip3 install -r "$SCRIPT_DIR/requirements.txt" --quiet --break-system-packages 2>/dev/null \
+            || pip3 install -r "$SCRIPT_DIR/requirements.txt" --quiet 2>/dev/null \
+            || pip3 install flask flask-socketio flask-cors requests cryptography python-dotenv psutil markdown Jinja2 --quiet --break-system-packages 2>/dev/null \
+            || pip3 install flask flask-socketio flask-cors requests cryptography python-dotenv psutil markdown Jinja2 --quiet 2>/dev/null
+        
+        if [ $? -eq 0 ]; then
+            echo -e "\033[0;32m    [✓] Dependencies installed successfully.\033[0m"
+        else
+            echo -e "\033[0;31m    [✗] Dependency install failed. Try: sudo pip3 install -r requirements.txt --break-system-packages\033[0m"
+            exit 1
+        fi
+    fi
+}
+
+_check_and_install
+
+echo ""
 echo -e "\033[0;32m    🌐 Starting server at http://localhost:5000\033[0m"
 echo -e "\033[0;32m    📡 Press Ctrl+C to stop\033[0m"
 echo ""
 
-# Start Flask app
-python3 app.py
+# ─── Start Flask app with auto-restart on crash ────────────
+MAX_RESTARTS=3
+RESTART_COUNT=0
+
+while [ $RESTART_COUNT -lt $MAX_RESTARTS ]; do
+    python3 app.py
+    EXIT_CODE=$?
+    
+    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 130 ]; then
+        # Clean exit (0) or Ctrl+C (130)
+        break
+    fi
+    
+    RESTART_COUNT=$((RESTART_COUNT + 1))
+    
+    if [ $RESTART_COUNT -lt $MAX_RESTARTS ]; then
+        echo ""
+        echo -e "\033[1;33m[!] Server crashed (exit code: $EXIT_CODE). Restarting ($RESTART_COUNT/$MAX_RESTARTS)...\033[0m"
+        
+        # Re-check and install deps in case a module was missing
+        _check_and_install
+        
+        sleep 2
+    else
+        echo ""
+        echo -e "\033[0;31m[✗] Server failed after $MAX_RESTARTS restarts. Check the error above.\033[0m"
+    fi
+done

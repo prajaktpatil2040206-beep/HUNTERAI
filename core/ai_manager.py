@@ -524,7 +524,9 @@ class AIManager:
                 elif resp.status_code in (429, 503):
                     # Rate limited or overloaded — try next model
                     last_error = f"{try_model} unavailable ({resp.status_code})"
-                    time.sleep(1)  # Brief pause before fallback
+                    # Exponential backoff: 1s, 2s, 4s per model index
+                    backoff = min(2 ** models_to_try.index(try_model), 8)
+                    time.sleep(backoff)
                     continue
                 else:
                     last_error = f"Gemini API error ({resp.status_code}): {resp.text[:300]}"
@@ -551,6 +553,41 @@ class AIManager:
             content = data["content"][0]["text"]
             return {"response": content, "usage": data.get("usage", {})}
         return {"error": f"Claude API error ({resp.status_code}): {resp.text[:300]}"}
+
+    def chat_with_retry(self, messages, hunt_mode="intermediate", exec_mode="feedback",
+                        model_id=None, error_context=None, max_retries=3):
+        """
+        Wrapper around chat() that retries on transient errors.
+        Used by the autofix engine to ensure AI calls survive flaky networks.
+        """
+        last_result = None
+        for attempt in range(1, max_retries + 1):
+            result = self.chat(
+                messages, hunt_mode=hunt_mode, exec_mode=exec_mode,
+                model_id=model_id, error_context=error_context
+            )
+            if "error" not in result:
+                return result  # Success
+
+            last_result = result
+            error_msg = result.get("error", "")
+
+            # Only retry on transient errors
+            transient_keywords = [
+                "timed out", "timeout", "connection", "unavailable",
+                "503", "502", "500", "rate limit", "overloaded",
+                "try again", "temporarily"
+            ]
+            is_transient = any(kw in error_msg.lower() for kw in transient_keywords)
+
+            if not is_transient:
+                return result  # Non-transient error, don't retry
+
+            if attempt < max_retries:
+                backoff = min(2 ** attempt, 16)  # 2s, 4s, 8s, 16s
+                time.sleep(backoff)
+
+        return last_result  # Return the last error after all retries
 
 
 # Singleton

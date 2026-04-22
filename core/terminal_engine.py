@@ -1,11 +1,13 @@
 """
-HunterAI - Terminal Execution Engine (v2)
+HunterAI - Terminal Execution Engine (v3)
 Real-time subprocess execution with WebSocket streaming.
 Features:
 - Captures stdout/stderr separately for error detection
 - Stores output per-process for AI error analysis
 - Signals completion with exit codes
 - Process management (kill, list)
+- Error callback system for auto-fix triggering
+- wait_for_completion() for synchronous fix loops
 """
 
 import os
@@ -29,11 +31,21 @@ class TerminalEngine:
         self._processes = OrderedDict()
         self._socketio = None
         self._max_history = 200  # Keep last 200 processes
+        self._error_callback = None  # Called when a process errors
+        self._completion_events = {}  # process_id → threading.Event
+        self._completion_lock = threading.Lock()
         os.makedirs(TERMINAL_LOGS_DIR, exist_ok=True)
 
     def set_socketio(self, socketio):
         """Connect the SocketIO instance for real-time streaming."""
         self._socketio = socketio
+
+    def set_error_callback(self, callback):
+        """
+        Set a callback function that fires when a command exits with error.
+        Signature: callback(process_id, hunt_id, error_context)
+        """
+        self._error_callback = callback
 
     def execute(self, command, cwd=None, hunt_id=None):
         """
@@ -58,9 +70,15 @@ class TerminalEngine:
 
         self._processes[process_id] = process_info
 
+        # Create completion event for wait_for_completion()
+        with self._completion_lock:
+            self._completion_events[process_id] = threading.Event()
+
         # Trim old processes
         while len(self._processes) > self._max_history:
-            self._processes.popitem(last=False)
+            old_id, _ = self._processes.popitem(last=False)
+            with self._completion_lock:
+                self._completion_events.pop(old_id, None)
 
         # Emit command started event
         self._emit("terminal_command", {
@@ -81,16 +99,36 @@ class TerminalEngine:
 
     def _run_process(self, process_id, command, cwd, hunt_id):
         """Execute the command and stream output."""
+        exit_code = -1
         try:
+            # Build unrestricted environment for full system access
+            proc_env = os.environ.copy()
+            proc_env["TERM"] = "xterm-256color"
+            proc_env["HOME"] = os.environ.get("HOME", "/root")
+            proc_env["LANG"] = "en_US.UTF-8"
+            proc_env["DEBIAN_FRONTEND"] = "noninteractive"
+            # Ensure all common tool paths are in PATH
+            extra_paths = [
+                "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin",
+                "/sbin", "/bin", "/snap/bin", "/usr/local/go/bin",
+                "/root/.local/bin", "/root/go/bin", "/opt",
+            ]
+            existing_path = proc_env.get("PATH", "")
+            for p in extra_paths:
+                if p not in existing_path:
+                    existing_path = f"{p}:{existing_path}"
+            proc_env["PATH"] = existing_path
+
             proc = subprocess.Popen(
                 command,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=cwd,
-                env={**os.environ, "TERM": "xterm-256color"},
+                env=proc_env,
                 bufsize=1,
                 universal_newlines=True,
+                preexec_fn=os.setsid if os.name != 'nt' else None,
             )
 
             self._processes[process_id]["_proc"] = proc
@@ -135,6 +173,14 @@ class TerminalEngine:
             # Save log to file
             self._save_log(process_id)
 
+            # Fire error callback if command failed
+            if exit_code != 0 and self._error_callback:
+                try:
+                    error_ctx = self.get_error_context(process_id)
+                    self._error_callback(process_id, hunt_id, error_ctx)
+                except Exception:
+                    pass  # Don't let callback errors break the engine
+
         except FileNotFoundError:
             self._processes[process_id]["status"] = "error"
             self._processes[process_id]["exit_code"] = 127
@@ -155,6 +201,14 @@ class TerminalEngine:
             })
             self._save_log(process_id)
 
+            # Fire error callback
+            if self._error_callback:
+                try:
+                    error_ctx = self.get_error_context(process_id)
+                    self._error_callback(process_id, hunt_id, error_ctx)
+                except Exception:
+                    pass
+
         except Exception as e:
             self._processes[process_id]["status"] = "error"
             self._processes[process_id]["exit_code"] = -1
@@ -174,6 +228,21 @@ class TerminalEngine:
                 "has_errors": True
             })
             self._save_log(process_id)
+
+            # Fire error callback
+            if self._error_callback:
+                try:
+                    error_ctx = self.get_error_context(process_id)
+                    self._error_callback(process_id, hunt_id, error_ctx)
+                except Exception:
+                    pass
+
+        finally:
+            # Signal completion event so wait_for_completion() unblocks
+            with self._completion_lock:
+                event = self._completion_events.get(process_id)
+                if event:
+                    event.set()
 
     def _stream_output(self, process_id, pipe, output_type):
         """Stream output from a pipe line by line."""
@@ -235,6 +304,25 @@ class TerminalEngine:
 
     # ─── Public API ──────────────────────────────────────────
 
+    def wait_for_completion(self, process_id, timeout=300):
+        """
+        Block until a process completes or timeout is reached.
+        Returns True if process completed, False if timed out.
+        Used by the autofix loop to wait for fix commands.
+        """
+        with self._completion_lock:
+            event = self._completion_events.get(process_id)
+
+        if not event:
+            # Process might already be done or not exist
+            info = self._processes.get(process_id)
+            if info and info["status"] in ("completed", "error", "killed"):
+                return True
+            return False
+
+        # Wait for the event to be set (process completion)
+        return event.wait(timeout=timeout)
+
     def kill_process(self, process_id):
         """Kill a running process."""
         info = self._processes.get(process_id)
@@ -243,6 +331,11 @@ class TerminalEngine:
                 info["_proc"].kill()
                 info["status"] = "killed"
                 info["exit_code"] = -9
+                # Signal completion event
+                with self._completion_lock:
+                    event = self._completion_events.get(process_id)
+                    if event:
+                        event.set()
                 return True
             except Exception:
                 return False

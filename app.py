@@ -14,6 +14,8 @@ from flask_cors import CORS
 
 from config import load_config, ensure_directories, DATA_DIR
 from core.terminal_engine import terminal_engine
+from core.ai_manager import ai_manager
+from core.autofix_engine import autofix_engine
 from routes.chat import chat_bp
 from routes.projects import projects_bp
 from routes.models import models_bp
@@ -38,6 +40,9 @@ socketio.on_namespace(TerminalNamespace("/terminal"))
 
 # Connect terminal engine to socketio
 terminal_engine.set_socketio(socketio)
+
+# Initialize the auto-fix engine with all dependencies
+autofix_engine.initialize(terminal_engine, ai_manager, socketio)
 
 # Register blueprints
 app.register_blueprint(chat_bp)

@@ -37,7 +37,10 @@ python3 -m venv venv 2>/dev/null || true
 
 echo -e "${CYAN}[*] Installing Python dependencies...${NC}"
 source venv/bin/activate 2>/dev/null || true
-pip3 install -r requirements.txt --quiet 2>/dev/null || pip3 install flask flask-socketio flask-cors requests cryptography python-dotenv psutil gevent gevent-websocket openai google-genai anthropic markdown Jinja2 --quiet
+pip3 install -r requirements.txt --quiet --break-system-packages 2>/dev/null \
+    || pip3 install -r requirements.txt --quiet 2>/dev/null \
+    || pip3 install flask flask-socketio flask-cors requests cryptography python-dotenv psutil markdown Jinja2 --quiet --break-system-packages 2>/dev/null \
+    || pip3 install flask flask-socketio flask-cors requests cryptography python-dotenv psutil markdown Jinja2 --quiet
 
 echo -e "${CYAN}[*] Creating data directories...${NC}"
 mkdir -p "$INSTALL_DIR/data/projects"

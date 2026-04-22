@@ -1,11 +1,12 @@
 """
-HunterAI - Chat API Routes (v3)
+HunterAI - Chat API Routes (v4)
 Enhanced with:
-- Auto error detection → AI auto-fix loop
+- Full auto-fix loop integration (error → classify → fix → retry)
 - Plan → Approve → Execute workflow
 - Accept / Accept All / Reject action system
-- Autonomous vs Feedback execution modes
+- Autonomous mode auto-triggers fix loop on failures
 - Error context feedback to AI for self-healing
+- Autofix status & abort endpoints
 """
 
 import os
@@ -19,11 +20,49 @@ from storage.local_store import chats_store, hunts_store, LocalStore
 from core.ai_manager import ai_manager
 from core.terminal_engine import terminal_engine
 from core.asset_manager import asset_manager
+from core.autofix_engine import autofix_engine
 
 chat_bp = Blueprint("chat", __name__)
 
 # Pending actions store
 actions_store = LocalStore("actions")
+
+# Track which processes are under autonomous auto-fix
+# so the error callback knows when to trigger the loop
+_autonomous_processes = {}  # process_id → {hunt_id, mode, exec_mode}
+_autonomous_lock = __import__("threading").Lock()
+
+
+def _register_autonomous_process(process_id, hunt_id, mode, exec_mode):
+    """Register a process for autonomous auto-fix on failure."""
+    with _autonomous_lock:
+        _autonomous_processes[process_id] = {
+            "hunt_id": hunt_id,
+            "mode": mode,
+            "exec_mode": exec_mode,
+        }
+
+
+def _on_process_error(process_id, hunt_id, error_context):
+    """
+    Error callback — fired by terminal engine when any command fails.
+    If the process was in autonomous mode, auto-trigger the fix loop.
+    """
+    with _autonomous_lock:
+        proc_info = _autonomous_processes.pop(process_id, None)
+
+    if proc_info and proc_info["exec_mode"] == "autonomous":
+        # Auto-start the fix loop for autonomous processes
+        autofix_engine.start_fix_loop(
+            process_id=process_id,
+            hunt_id=proc_info["hunt_id"],
+            mode=proc_info["mode"],
+            exec_mode="autonomous",
+        )
+
+
+# Wire the error callback into the terminal engine
+terminal_engine.set_error_callback(_on_process_error)
 
 
 @chat_bp.route("/api/chat/send", methods=["POST"])
@@ -94,13 +133,15 @@ def send_message():
 
     if commands:
         if exec_mode == "autonomous":
-            # Auto-execute all
+            # Auto-execute all and register for auto-fix on failure
             for cmd in commands:
                 pid = terminal_engine.execute(cmd, hunt_id=hunt_id)
+                _register_autonomous_process(pid, hunt_id, mode, exec_mode)
                 executed_actions.append({
                     "command": cmd,
                     "process_id": pid,
-                    "status": "executing"
+                    "status": "executing",
+                    "autofix_enabled": True,
                 })
         else:
             # Create pending actions for approval
@@ -133,9 +174,9 @@ def send_message():
 @chat_bp.route("/api/chat/auto-fix", methods=["POST"])
 def auto_fix_error():
     """
-    Auto-fix a failed command by sending the error context back to AI.
-    The AI analyzes the error and provides a corrected command.
-    This is the self-healing loop.
+    Trigger the self-healing auto-fix loop for a failed command.
+    The loop retries up to MAX_RETRIES times, classifying errors and
+    applying fixes until the command succeeds or retries are exhausted.
     """
     data = request.get_json()
     hunt_id = data.get("hunt_id")
@@ -151,87 +192,66 @@ def auto_fix_error():
     if not error_ctx:
         return jsonify({"error": "No error found for this process, or process succeeded."}), 400
 
-    # Load chat history
+    # Log the error notification in the chat
     chat = chats_store.load(hunt_id) or {"hunt_id": hunt_id, "messages": []}
-
-    # Add error notification to chat
     error_msg = {
         "id": _gen_id(),
         "role": "system",
-        "content": f"❌ **Command failed** (exit code {error_ctx['exit_code']}):\n```\n{error_ctx['command']}\n```\n**Error output:**\n```\n{error_ctx['stderr'][:500]}\n```\n\n🔧 *Auto-fix engaged — analyzing error...*",
+        "content": (
+            f"❌ **Command failed** (exit code {error_ctx['exit_code']}):\n"
+            f"```\n{error_ctx['command']}\n```\n"
+            f"**Error output:**\n```\n{error_ctx['stderr'][:500]}\n```\n\n"
+            f"🔧 *Auto-fix loop engaged — will retry up to 5 times...*"
+        ),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     chat["messages"].append(error_msg)
-
-    # Build context for AI error fix
-    ai_messages = []
-    for m in chat["messages"][-30:]:
-        if m["role"] in ("user", "assistant"):
-            ai_messages.append({"role": m["role"], "content": m["content"]})
-
-    # Add the error as a user message asking for fix
-    ai_messages.append({
-        "role": "user",
-        "content": f"The command `{error_ctx['command']}` failed with exit code {error_ctx['exit_code']}.\n\nError output:\n```\n{error_ctx['stderr'][:1000]}\n```\n\nStdout:\n```\n{error_ctx['stdout'][:500]}\n```\n\nPlease analyze this error, explain what went wrong, and provide the corrected command. If a tool is missing, install it first."
-    })
-
-    # Get AI fix
-    result = ai_manager.chat(ai_messages, hunt_mode=mode, exec_mode=exec_mode, error_context=error_ctx)
-
-    if "error" in result:
-        fix_response = f"⚠️ Auto-fix failed: {result['error']}"
-        fix_commands = []
-    else:
-        fix_response = result.get("response", "Could not generate fix.")
-        fix_commands = _extract_commands(fix_response)
-
-    # Save AI fix response
-    fix_msg_id = _gen_id()
-    fix_msg = {
-        "id": fix_msg_id,
-        "role": "assistant",
-        "content": fix_response,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "is_auto_fix": True
-    }
-    chat["messages"].append(fix_msg)
     chats_store.save(hunt_id, chat)
 
-    # Handle fix commands
-    pending_actions = []
-    executed_actions = []
+    # Start the auto-fix loop (runs in background thread)
+    state_id = autofix_engine.start_fix_loop(
+        process_id=process_id,
+        hunt_id=hunt_id,
+        mode=mode,
+        exec_mode=exec_mode,
+    )
 
-    if fix_commands:
-        if exec_mode == "autonomous":
-            for cmd in fix_commands:
-                pid = terminal_engine.execute(cmd, hunt_id=hunt_id)
-                executed_actions.append({"command": cmd, "process_id": pid, "status": "executing"})
-        else:
-            for i, cmd in enumerate(fix_commands):
-                action_id = _gen_id()
-                action = {
-                    "action_id": action_id,
-                    "hunt_id": hunt_id,
-                    "message_id": fix_msg_id,
-                    "type": "fix_command",
-                    "command": cmd,
-                    "status": "pending",
-                    "order": i,
-                    "original_error_process": process_id,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-                actions_store.save(action_id, action)
-                pending_actions.append(action)
+    if not state_id:
+        return jsonify({"error": "Could not start auto-fix loop."}), 500
 
     return jsonify({
         "success": True,
-        "message": fix_msg,
-        "error_message": error_msg,
-        "fix_commands": fix_commands,
-        "pending_actions": pending_actions,
-        "executed_actions": executed_actions,
-        "exec_mode": exec_mode
+        "state_id": state_id,
+        "message": error_msg,
+        "status": "autofix_started",
+        "max_retries": 5,
     })
+
+
+@chat_bp.route("/api/chat/autofix-status/<state_id>", methods=["GET"])
+def get_autofix_status(state_id):
+    """Get the current state of an auto-fix loop."""
+    state = autofix_engine.get_fix_state(state_id)
+    if not state:
+        return jsonify({"error": "Fix state not found"}), 404
+    return jsonify({"fix_state": state})
+
+
+@chat_bp.route("/api/chat/autofix-abort/<state_id>", methods=["POST"])
+def abort_autofix(state_id):
+    """Abort a running auto-fix loop."""
+    success = autofix_engine.abort_fix(state_id)
+    if success:
+        return jsonify({"success": True, "message": "Auto-fix loop aborted."})
+    return jsonify({"error": "Fix loop not found or already completed."}), 400
+
+
+@chat_bp.route("/api/chat/autofix-active", methods=["GET"])
+def list_active_fixes():
+    """List all currently running auto-fix loops."""
+    hunt_id = request.args.get("hunt_id")
+    fixes = autofix_engine.list_active_fixes(hunt_id=hunt_id)
+    return jsonify({"active_fixes": fixes})
 
 
 # ─── Action Approval Endpoints ─────────────────────────────
@@ -251,6 +271,7 @@ def get_pending_actions():
 def accept_action():
     data = request.get_json()
     action_id = data.get("action_id")
+    auto_fix = data.get("auto_fix", False)  # Enable auto-fix for this action
     if not action_id:
         return jsonify({"error": "action_id required"}), 400
 
@@ -261,8 +282,17 @@ def accept_action():
         return jsonify({"error": "Action already processed"}), 400
 
     pid = terminal_engine.execute(action["command"], hunt_id=action.get("hunt_id"))
+
+    # If auto-fix requested, register for auto-fix on failure
+    if auto_fix:
+        _register_autonomous_process(
+            pid, action.get("hunt_id"),
+            mode="intermediate", exec_mode="autonomous"
+        )
+
     action["status"] = "accepted"
     action["process_id"] = pid
+    action["auto_fix_enabled"] = auto_fix
     action["executed_at"] = datetime.now(timezone.utc).isoformat()
     actions_store.save(action_id, action)
 
@@ -273,6 +303,7 @@ def accept_action():
 def accept_all_actions():
     data = request.get_json()
     hunt_id = data.get("hunt_id")
+    auto_fix = data.get("auto_fix", False)
     if not hunt_id:
         return jsonify({"error": "hunt_id required"}), 400
 
@@ -283,8 +314,13 @@ def accept_all_actions():
     executed = []
     for action in pending:
         pid = terminal_engine.execute(action["command"], hunt_id=hunt_id)
+
+        if auto_fix:
+            _register_autonomous_process(pid, hunt_id, "intermediate", "autonomous")
+
         action["status"] = "accepted"
         action["process_id"] = pid
+        action["auto_fix_enabled"] = auto_fix
         action["executed_at"] = datetime.now(timezone.utc).isoformat()
         actions_store.save(action["_id"], action)
         executed.append({"action_id": action["_id"], "command": action["command"], "process_id": pid})
@@ -363,10 +399,16 @@ def execute_command_direct():
     data = request.get_json()
     command = data.get("command", "").strip()
     hunt_id = data.get("hunt_id")
+    auto_fix = data.get("auto_fix", False)
     if not command:
         return jsonify({"error": "No command provided"}), 400
+
     pid = terminal_engine.execute(command, hunt_id=hunt_id)
-    return jsonify({"success": True, "process_id": pid, "command": command})
+
+    if auto_fix:
+        _register_autonomous_process(pid, hunt_id, "intermediate", "autonomous")
+
+    return jsonify({"success": True, "process_id": pid, "command": command, "auto_fix": auto_fix})
 
 
 @chat_bp.route("/api/chat/process-status/<process_id>", methods=["GET"])
@@ -376,10 +418,15 @@ def get_process_status(process_id):
     if not proc:
         return jsonify({"error": "Process not found"}), 404
     error_ctx = terminal_engine.get_error_context(process_id)
+
+    # Also check if there's an active auto-fix loop for this process
+    fix_state = autofix_engine.get_fix_state(process_id)
+
     return jsonify({
         "process": proc,
         "has_error": error_ctx is not None,
-        "error_context": error_ctx
+        "error_context": error_ctx,
+        "autofix_state": fix_state,
     })
 
 
